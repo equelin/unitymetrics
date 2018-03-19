@@ -73,7 +73,7 @@ func parseMap(index int, pathPtr *string, measurementNamePtr *string, tagNames m
 			// Formating fied set
 			// <field_key>=<field_value>
 			var field string
-			field = fmt.Sprintf("%s=%s", *pathPtr, concreteVal)
+			field = fmt.Sprintf("%s=%s", pathSplit[len(pathSplit)-1], concreteVal)
 
 			// Formating and printing the result using the InfluxDB's Line Protocol
 			// https://docs.influxdata.com/influxdb/v1.5/write_protocols/line_protocol_tutorial/
@@ -187,7 +187,7 @@ func main() {
 
 		var measurementName string
 		if pathSplit[0] == "kpi" {
-			measurementName = "kpi"
+			measurementName = fmt.Sprintf("kpi_%s", pathSplit[1])
 		} else {
 			measurementName = pathSplit[2]
 		}
