@@ -14,6 +14,40 @@ import (
 var log = logrus.New()
 var unityName string
 
+//
+func parseResult(path string, valuesMap map[string]interface{}) {
+
+	tagsMap := make(map[string]string)
+	tagNames := make(map[int]string)
+
+	pathSplit := strings.Split(path, ".")
+
+	var measurementName string
+	if pathSplit[0] == "kpi" {
+		measurementName = fmt.Sprintf("kpi_%s", pathSplit[1])
+	} else {
+		measurementName = pathSplit[2]
+	}
+
+	j := 0
+	for i, v := range pathSplit {
+		if v == "*" {
+			tagName := pathSplit[i-1]
+			tagNames[j] = tagName
+			j++
+		}
+	}
+
+	parseMap(
+		0,
+		&path,
+		&measurementName,
+		tagNames,
+		tagsMap,
+		valuesMap,
+	)
+}
+
 // https://stackoverflow.com/questions/29366038/looping-iterate-over-the-second-level-nested-json-in-go-lang
 func parseMap(index int, pathPtr *string, measurementNamePtr *string, tagNames map[int]string, tagsMap map[string]string, valuesMap map[string]interface{}) {
 
@@ -73,7 +107,13 @@ func parseMap(index int, pathPtr *string, measurementNamePtr *string, tagNames m
 			// Formating fied set
 			// <field_key>=<field_value>
 			var field string
-			field = fmt.Sprintf("%s=%s", pathSplit[len(pathSplit)-1], concreteVal)
+			_, ok := concreteVal.(float64)
+
+			if ok {
+				field = fmt.Sprintf("%s=%f", pathSplit[len(pathSplit)-1], concreteVal)
+			} else {
+				field = fmt.Sprintf("%s=%s", pathSplit[len(pathSplit)-1], concreteVal)
+			}
 
 			// Formating and printing the result using the InfluxDB's Line Protocol
 			// https://docs.influxdata.com/influxdb/v1.5/write_protocols/line_protocol_tutorial/
@@ -91,7 +131,8 @@ func main() {
 	passwordPtr := flag.String("password", "", "Password")
 	unityPtr := flag.String("unity", "", "Unity IP or FQDN")
 	intervalPtr := flag.Uint64("interval", 30, "Sampling interval")
-	pathsPtr := flag.String("paths", "kpi.sp.spa.utilization,sp.*.cpu.summary.busyTicks", "Unity metrics paths")
+	rtpathsPtr := flag.String("rtpaths", "kpi.sp.spa.utilization,sp.*.cpu.summary.busyTicks", "Real time metrics paths")
+	histpathsPtr := flag.String("histpaths", "sp.*.cpu.summary.utilization,sp.*.storage.lun.*.responseTime", "Historical metrics paths")
 	debugPtr := flag.Bool("debug", false, "Debug mode")
 
 	flag.Parse()
@@ -123,8 +164,14 @@ func main() {
 	log.WithFields(logrus.Fields{
 		"event": "flag",
 		"key":   "paths",
-		"value": *pathsPtr,
-	}).Debug("Parsed flag paths")
+		"value": *rtpathsPtr,
+	}).Debug("Parsed flag real time metrics paths")
+
+	log.WithFields(logrus.Fields{
+		"event": "flag",
+		"key":   "paths",
+		"value": *histpathsPtr,
+	}).Debug("Parsed flag historical metrics paths")
 
 	// Start a new Unity session
 
@@ -152,65 +199,58 @@ func main() {
 	// Store the name of the Unity
 	unityName = System.Entries[0].Content.Name
 
-	// metric paths
-	paths := strings.Split(*pathsPtr, ",")
+	if *histpathsPtr != "" {
 
-	// converting metric interval into uint32
-	var interval = uint32(*intervalPtr)
+		// metric paths
+		histpaths := strings.Split(*histpathsPtr, ",")
 
-	// Request a new metric query
-	Metric, err := session.NewMetricRealTimeQuery(paths, interval)
-	if err != nil {
-		log.Fatal(err)
-	}
+		for _, p := range histpaths {
 
-	// Waiting that the sampling of the metrics is done
-	time.Sleep(time.Duration(Metric.Content.Interval) * time.Second)
+			log.WithFields(logrus.Fields{
+				"event": "historical",
+				"key":   "paths",
+				"value": p,
+			}).Debug("Querying historical metric")
 
-	// Get the results of the query
-	Result, err := session.GetMetricRealTimeQueryResult(Metric.Content.ID)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Parse the results
-	for _, v := range Result.Entries {
-
-		valuesMap := v.Content.Values.(map[string]interface{})
-
-		tagsMap := make(map[string]string)
-		tagNames := make(map[int]string)
-
-		path := v.Content.Path
-
-		pathSplit := strings.Split(path, ".")
-
-		var measurementName string
-		if pathSplit[0] == "kpi" {
-			measurementName = fmt.Sprintf("kpi_%s", pathSplit[1])
-		} else {
-			measurementName = pathSplit[2]
-		}
-
-		j := 0
-		for i, v := range pathSplit {
-			if v == "*" {
-				tagName := pathSplit[i-1]
-				tagNames[j] = tagName
-				j++
+			// Request a new metric query
+			MetricValue, err := session.GetmetricValue(p)
+			if err != nil {
+				log.Error(err)
 			}
-		}
 
-		parseMap(
-			0,
-			&path,
-			&measurementName,
-			tagNames,
-			tagsMap,
-			valuesMap,
-		)
+			parseResult(MetricValue.Entries[0].Content.Path, MetricValue.Entries[0].Content.Values.(map[string]interface{}))
+		}
 	}
 
-	/* TODO: DELETE THE QUERY	*/
+	if *rtpathsPtr != "" {
 
+		// metric paths
+		rtpaths := strings.Split(*rtpathsPtr, ",")
+
+		// converting metric interval into uint32
+		var interval = uint32(*intervalPtr)
+
+		// Request a new metric query
+		Metric, err := session.NewMetricRealTimeQuery(rtpaths, interval)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// Waiting that the sampling of the metrics is done
+		time.Sleep(time.Duration(Metric.Content.Interval) * time.Second)
+
+		// Get the results of the query
+		Result, err := session.GetMetricRealTimeQueryResult(Metric.Content.ID)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// Parse the results
+
+		//var v entryStruct
+		for _, v := range Result.Entries {
+
+			parseResult(v.Content.Path, v.Content.Values.(map[string]interface{}))
+		}
+	}
 }
