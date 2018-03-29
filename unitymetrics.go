@@ -223,9 +223,9 @@ func main() {
 					"value": p,
 					"error": err,
 				}).Error("Querying historical metric")
+			} else {
+				parseResult(MetricValue.Entries[0].Content.Timestamp, MetricValue.Entries[0].Content.Path, MetricValue.Entries[0].Content.Values.(map[string]interface{}))
 			}
-
-			parseResult(MetricValue.Entries[0].Content.Timestamp, MetricValue.Entries[0].Content.Path, MetricValue.Entries[0].Content.Values.(map[string]interface{}))
 		}
 	}
 
@@ -254,14 +254,12 @@ func main() {
 				"key":   "error",
 				"error": err,
 			}).Error("Querying historical metric")
-		}
+		} else {
+			// Parse the results
+			for _, v := range Result.Entries {
 
-		// Parse the results
-
-		//var v entryStruct
-		for _, v := range Result.Entries {
-
-			parseResult(v.Content.Timestamp, v.Content.Path, v.Content.Values.(map[string]interface{}))
+				parseResult(v.Content.Timestamp, v.Content.Path, v.Content.Values.(map[string]interface{}))
+			}
 		}
 	}
 }
