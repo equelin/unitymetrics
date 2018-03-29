@@ -124,6 +124,29 @@ func parseMap(timestamp time.Time, index int, pathPtr *string, measurementNamePt
 	}
 }
 
+func parsePool(id string, name string, sizeFree uint64, sizeSubscribed uint64, sizeTotal uint64, sizeUsed uint64) {
+
+	var tags string
+
+	tags = fmt.Sprintf("unity=%s,pool=%s,poolname=%s", unityName, id, name)
+
+	fmt.Printf("pool,%s sizefree=%d %d\n", tags, sizeFree, time.Now().UnixNano())
+	fmt.Printf("pool,%s sizesubscribed=%d %d\n", tags, sizeSubscribed, time.Now().UnixNano())
+	fmt.Printf("pool,%s sizetotal=%d %d\n", tags, sizeTotal, time.Now().UnixNano())
+	fmt.Printf("pool,%s sizeused=%d %d\n", tags, sizeUsed, time.Now().UnixNano())
+}
+
+func parseStorageResource(id string, name string, sizeAllocated uint64, sizeTotal uint64, sizeUsed uint64) {
+
+	var tags string
+
+	tags = fmt.Sprintf("unity=%s,storageresource=%s,storageresourcename=%s", unityName, id, name)
+
+	fmt.Printf("storageresource,%s sizeallocated=%d %d\n", tags, sizeAllocated, time.Now().UnixNano())
+	fmt.Printf("storageresource,%s sizetotal=%d %d\n", tags, sizeTotal, time.Now().UnixNano())
+	fmt.Printf("storageresource,%s sizeused=%d %d\n", tags, sizeUsed, time.Now().UnixNano())
+}
+
 func main() {
 
 	// Set logs parameters
@@ -135,6 +158,7 @@ func main() {
 	intervalPtr := flag.Uint64("interval", 30, "Sampling interval")
 	rtpathsPtr := flag.String("rtpaths", "", "Real time metrics paths")
 	histpathsPtr := flag.String("histpaths", "", "Historical metrics paths")
+	capacityPtr := flag.Bool("capacity", false, "Display capacity statisitcs")
 	debugPtr := flag.Bool("debug", false, "Debug mode")
 
 	flag.Parse()
@@ -175,6 +199,12 @@ func main() {
 		"value": *histpathsPtr,
 	}).Debug("Parsed flag historical metrics paths")
 
+	log.WithFields(logrus.Fields{
+		"event": "flag",
+		"key":   "capacity",
+		"value": *capacityPtr,
+	}).Debug("Parsed flag capacity")
+
 	// Start a new Unity session
 
 	log.WithFields(logrus.Fields{
@@ -200,6 +230,31 @@ func main() {
 
 	// Store the name of the Unity
 	unityName = System.Entries[0].Content.Name
+
+	if *capacityPtr {
+
+		// Get pool informations
+		Pools, err := session.GetPool()
+		if err != nil {
+			log.Fatal(err)
+		} else {
+			for _, p := range Pools.Entries {
+
+				parsePool(p.Content.ID, p.Content.Name, p.Content.SizeFree, p.Content.SizeSubscribed, p.Content.SizeTotal, p.Content.SizeUsed)
+			}
+		}
+
+		StorageResources, err := session.GetStorageResource()
+		if err != nil {
+			log.Fatal(err)
+		} else {
+			for _, s := range StorageResources.Entries {
+
+				parseStorageResource(s.Content.ID, s.Content.Name, s.Content.SizeAllocated, s.Content.SizeTotal, s.Content.SizeUsed)
+			}
+		}
+
+	}
 
 	if *histpathsPtr != "" {
 
