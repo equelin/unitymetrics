@@ -15,7 +15,7 @@ var log = logrus.New()
 var unityName string
 
 //
-func parseResult(path string, valuesMap map[string]interface{}) {
+func parseResult(timestamp time.Time, path string, valuesMap map[string]interface{}) {
 
 	tagsMap := make(map[string]string)
 	tagNames := make(map[int]string)
@@ -39,6 +39,7 @@ func parseResult(path string, valuesMap map[string]interface{}) {
 	}
 
 	parseMap(
+		timestamp,
 		0,
 		&path,
 		&measurementName,
@@ -49,7 +50,7 @@ func parseResult(path string, valuesMap map[string]interface{}) {
 }
 
 // https://stackoverflow.com/questions/29366038/looping-iterate-over-the-second-level-nested-json-in-go-lang
-func parseMap(index int, pathPtr *string, measurementNamePtr *string, tagNames map[int]string, tagsMap map[string]string, valuesMap map[string]interface{}) {
+func parseMap(timestamp time.Time, index int, pathPtr *string, measurementNamePtr *string, tagNames map[int]string, tagsMap map[string]string, valuesMap map[string]interface{}) {
 
 	for key, val := range valuesMap {
 
@@ -74,6 +75,7 @@ func parseMap(index int, pathPtr *string, measurementNamePtr *string, tagNames m
 			}
 
 			parseMap(
+				timestamp,
 				index,
 				pathPtr,
 				measurementNamePtr,
@@ -117,7 +119,7 @@ func parseMap(index int, pathPtr *string, measurementNamePtr *string, tagNames m
 
 			// Formating and printing the result using the InfluxDB's Line Protocol
 			// https://docs.influxdata.com/influxdb/v1.5/write_protocols/line_protocol_tutorial/
-			fmt.Printf("%s,%s %s %d\n", *measurementNamePtr, tags, field, time.Now().UnixNano())
+			fmt.Printf("%s,%s %s %d\n", *measurementNamePtr, tags, field, timestamp.UnixNano())
 		}
 	}
 }
@@ -131,8 +133,8 @@ func main() {
 	passwordPtr := flag.String("password", "", "Password")
 	unityPtr := flag.String("unity", "", "Unity IP or FQDN")
 	intervalPtr := flag.Uint64("interval", 30, "Sampling interval")
-	rtpathsPtr := flag.String("rtpaths", "kpi.sp.spa.utilization,sp.*.cpu.summary.busyTicks", "Real time metrics paths")
-	histpathsPtr := flag.String("histpaths", "sp.*.cpu.summary.utilization,sp.*.storage.lun.*.responseTime", "Historical metrics paths")
+	rtpathsPtr := flag.String("rtpaths", "", "Real time metrics paths")
+	histpathsPtr := flag.String("histpaths", "", "Historical metrics paths")
 	debugPtr := flag.Bool("debug", false, "Debug mode")
 
 	flag.Parse()
@@ -215,10 +217,15 @@ func main() {
 			// Request a new metric query
 			MetricValue, err := session.GetmetricValue(p)
 			if err != nil {
-				log.Error(err)
+				log.WithFields(logrus.Fields{
+					"event": "historical",
+					"key":   "paths",
+					"value": p,
+					"error": err,
+				}).Error("Querying historical metric")
 			}
 
-			parseResult(MetricValue.Entries[0].Content.Path, MetricValue.Entries[0].Content.Values.(map[string]interface{}))
+			parseResult(MetricValue.Entries[0].Content.Timestamp, MetricValue.Entries[0].Content.Path, MetricValue.Entries[0].Content.Values.(map[string]interface{}))
 		}
 	}
 
@@ -242,7 +249,11 @@ func main() {
 		// Get the results of the query
 		Result, err := session.GetMetricRealTimeQueryResult(Metric.Content.ID)
 		if err != nil {
-			log.Fatal(err)
+			log.WithFields(logrus.Fields{
+				"event": "realtime",
+				"key":   "error",
+				"error": err,
+			}).Error("Querying historical metric")
 		}
 
 		// Parse the results
@@ -250,7 +261,7 @@ func main() {
 		//var v entryStruct
 		for _, v := range Result.Entries {
 
-			parseResult(v.Content.Path, v.Content.Values.(map[string]interface{}))
+			parseResult(v.Content.Timestamp, v.Content.Path, v.Content.Values.(map[string]interface{}))
 		}
 	}
 }
