@@ -176,6 +176,31 @@ func parseStorageResource(id string, name string, sizeAllocated uint64, sizeTota
 	printInflux("storageresource", tagsMap, fieldsMap, time.Now().UnixNano())
 }
 
+func parseKpiValue(id string, name string, path string, value float64) {
+
+	pathSplit := strings.Split(path, ".")
+	tagsMap := make(map[string]string)
+	fieldsMap := make(map[string]string)
+
+	tagsMap["unity"] = unityName
+
+	for i, v := range pathSplit {
+		if v == id {
+			tagName := strings.ToLower(pathSplit[i-1])
+			tagsMap[tagName] = v
+			tagsMap[tagName+"name"] = strings.Replace(name, " ", "_", -1)
+		}
+		if v == "sp" || v == "rw" || v == "lun" {
+			tagsMap["lun"] = pathSplit[i+1]
+		}
+	}
+
+	fieldsMap[pathSplit[len(pathSplit)-1]] = fmt.Sprintf("%f", value)
+
+	printInflux("kpi_"+pathSplit[1], tagsMap, fieldsMap, time.Now().UnixNano())
+}
+
+// printInflux purpose is to output data in the influxdb line format
 func printInflux(measurement string, tagsMap map[string]string, fieldsMap map[string]string, timestamp int64) {
 
 	// Parse tagsMap
@@ -216,6 +241,7 @@ func main() {
 	intervalPtr := flag.Uint64("interval", 30, "Sampling interval")
 	rtpathsPtr := flag.String("rtpaths", "", "Real time metrics paths")
 	histpathsPtr := flag.String("histpaths", "", "Historical metrics paths")
+	histkpipathsPtr := flag.String("histkpipaths", "", "Historical KPI metrics paths")
 	capacityPtr := flag.Bool("capacity", false, "Display capacity statisitcs")
 	debugPtr := flag.Bool("debug", false, "Debug mode")
 
@@ -256,6 +282,12 @@ func main() {
 		"key":   "paths",
 		"value": *histpathsPtr,
 	}).Debug("Parsed flag historical metrics paths")
+
+	log.WithFields(logrus.Fields{
+		"event": "flag",
+		"key":   "paths",
+		"value": *histkpipathsPtr,
+	}).Debug("Parsed flag historical KPI metrics paths")
 
 	log.WithFields(logrus.Fields{
 		"event": "flag",
@@ -306,6 +338,29 @@ func main() {
 	} else {
 		for _, s := range StorageResources.Entries {
 			unityStorageResource = append(unityStorageResource, s.Content)
+		}
+	}
+
+	if *histkpipathsPtr != "" {
+		// Request a new kpi query
+		histkpipaths := strings.Split(*histkpipathsPtr, ",")
+
+		for _, p := range histkpipaths {
+
+			KpiValue, err := session.GetkpiValue(p)
+			if err != nil {
+				log.WithFields(logrus.Fields{
+					"event": "historical",
+					"key":   "paths",
+					"value": p,
+					"error": err,
+				}).Error("Querying kpi historical metric(s)")
+			} else {
+				for _, k := range KpiValue.Entries {
+					parseKpiValue(k.Content.ID, k.Content.Name, k.Content.Path, k.Content.Values[k.Content.EndTime])
+				}
+
+			}
 		}
 	}
 
