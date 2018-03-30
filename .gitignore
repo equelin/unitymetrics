@@ -1,4 +1,5 @@
 unitymetrics
 unitymetrics.exe
+telegraf.conf
 *.tar.gz
 *.zip
