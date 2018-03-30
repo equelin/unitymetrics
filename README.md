@@ -2,7 +2,11 @@
 
 Unitymetrics is a tool written in Go for collecting usage and performance metrics from a Dell EMC Unity array and translating them in InfluxDB's line protocol.
 
-It can be useful to send metrics in a InfluxDB database with the help of Telegraf.
+![unitymetrics-min](https://user-images.githubusercontent.com/9823778/38147007-b9abfe82-3450-11e8-8590-87d3afb7e480.png)
+
+It can be useful to send metrics in a InfluxDB database with the help of Telegraf and then display metrics in grafana.
+
+![screenshot-2018-3-30 grafana - unity](https://user-images.githubusercontent.com/9823778/38147174-60410d8c-3451-11e8-8320-016c38dbe705.png)
 
 ## How to find the available metrics
 
