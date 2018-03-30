@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,8 +12,30 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// Types
+type pool struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	SizeFree       uint64 `json:"sizeFree"`
+	SizeTotal      uint64 `json:"sizeTotal"`
+	SizeUsed       uint64 `json:"sizeUsed"`
+	SizeSubscribed uint64 `json:"sizeSubscribed"`
+}
+
+type storageresource struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	SizeAllocated uint64 `json:"sizeAllocated"`
+	SizeTotal     uint64 `json:"sizeTotal"`
+	SizeUsed      uint64 `json:"sizeUsed"`
+	Type          int    `json:"type"`
+}
+
+// Variables
 var log = logrus.New()
 var unityName string
+var unityPools []pool
+var unityStorageResource []storageresource
 
 //
 func parseResult(timestamp time.Time, path string, valuesMap map[string]interface{}) {
@@ -99,52 +122,87 @@ func parseMap(timestamp time.Time, index int, pathPtr *string, measurementNamePt
 
 			// Formating tags set
 			// <tag_key>=<tag_value>,<tag_key>=<tag_value>
-			var tags string
-
-			tags = fmt.Sprintf("unity=%s", unityName)
-			for k, v := range tagsMap {
-				tags = tags + fmt.Sprintf(",%s=%s", k, v)
-			}
+			tagsMap["unity"] = unityName
 
 			// Formating fied set
 			// <field_key>=<field_value>
-			var field string
+			fieldsMap := make(map[string]string)
 			_, ok := concreteVal.(float64)
 
 			if ok {
-				field = fmt.Sprintf("%s=%f", pathSplit[len(pathSplit)-1], concreteVal)
+				fieldsMap[pathSplit[len(pathSplit)-1]] = fmt.Sprintf("%f", concreteVal)
 			} else {
-				field = fmt.Sprintf("%s=%s", pathSplit[len(pathSplit)-1], concreteVal)
+				fieldsMap[pathSplit[len(pathSplit)-1]] = fmt.Sprintf("%s", concreteVal)
 			}
 
 			// Formating and printing the result using the InfluxDB's Line Protocol
 			// https://docs.influxdata.com/influxdb/v1.5/write_protocols/line_protocol_tutorial/
-			fmt.Printf("%s,%s %s %d\n", *measurementNamePtr, tags, field, timestamp.UnixNano())
+
+			printInflux(*measurementNamePtr, tagsMap, fieldsMap, timestamp.UnixNano())
 		}
 	}
 }
 
 func parsePool(id string, name string, sizeFree uint64, sizeSubscribed uint64, sizeTotal uint64, sizeUsed uint64) {
 
-	var tags string
+	tagsMap := make(map[string]string)
+	fieldsMap := make(map[string]string)
 
-	tags = fmt.Sprintf("unity=%s,pool=%s,poolname=%s", unityName, id, name)
+	tagsMap["unity"] = unityName
+	tagsMap["pool"] = id
+	tagsMap["poolname"] = name
 
-	fmt.Printf("pool,%s sizefree=%d %d\n", tags, sizeFree, time.Now().UnixNano())
-	fmt.Printf("pool,%s sizesubscribed=%d %d\n", tags, sizeSubscribed, time.Now().UnixNano())
-	fmt.Printf("pool,%s sizetotal=%d %d\n", tags, sizeTotal, time.Now().UnixNano())
-	fmt.Printf("pool,%s sizeused=%d %d\n", tags, sizeUsed, time.Now().UnixNano())
+	fieldsMap["sizefree"] = strconv.FormatUint(sizeFree, 10)
+	fieldsMap["sizesubscribed"] = strconv.FormatUint(sizeSubscribed, 10)
+	fieldsMap["sizetotal"] = strconv.FormatUint(sizeTotal, 10)
+	fieldsMap["sizeused"] = strconv.FormatUint(sizeUsed, 10)
+
+	printInflux("pool", tagsMap, fieldsMap, time.Now().UnixNano())
 }
 
 func parseStorageResource(id string, name string, sizeAllocated uint64, sizeTotal uint64, sizeUsed uint64) {
 
+	tagsMap := make(map[string]string)
+	fieldsMap := make(map[string]string)
+
+	tagsMap["unity"] = unityName
+	tagsMap["storageresource"] = id
+	tagsMap["storageresourcename"] = name
+
+	fieldsMap["sizeallocated"] = strconv.FormatUint(sizeAllocated, 10)
+	fieldsMap["sizetotal"] = strconv.FormatUint(sizeTotal, 10)
+	fieldsMap["sizeused"] = strconv.FormatUint(sizeUsed, 10)
+
+	printInflux("storageresource", tagsMap, fieldsMap, time.Now().UnixNano())
+}
+
+func printInflux(measurement string, tagsMap map[string]string, fieldsMap map[string]string, timestamp int64) {
+
+	// Parse tagsMap
 	var tags string
+	var i int
+	for k, v := range tagsMap {
+		if i == 0 {
+			tags = tags + fmt.Sprintf("%s=%s", k, v)
+		} else {
+			tags = tags + fmt.Sprintf(",%s=%s", k, v)
+		}
+		i++
+	}
 
-	tags = fmt.Sprintf("unity=%s,storageresource=%s,storageresourcename=%s", unityName, id, name)
+	// Parse fieldsMap
+	var fields string
+	var j int
+	for k, v := range fieldsMap {
+		if j == 0 {
+			fields = fields + fmt.Sprintf("%s=%s", k, v)
+		} else {
+			fields = fields + fmt.Sprintf(",%s=%s", k, v)
+		}
+		j++
+	}
 
-	fmt.Printf("storageresource,%s sizeallocated=%d %d\n", tags, sizeAllocated, time.Now().UnixNano())
-	fmt.Printf("storageresource,%s sizetotal=%d %d\n", tags, sizeTotal, time.Now().UnixNano())
-	fmt.Printf("storageresource,%s sizeused=%d %d\n", tags, sizeUsed, time.Now().UnixNano())
+	fmt.Printf("%s,%s %s %d\n", measurement, tags, fields, timestamp)
 }
 
 func main() {
@@ -226,34 +284,41 @@ func main() {
 	System, err := session.GetbasicSystemInfo()
 	if err != nil {
 		log.Fatal(err)
+	} else {
+		// Store the name of the Unity
+		unityName = System.Entries[0].Content.Name
 	}
 
-	// Store the name of the Unity
-	unityName = System.Entries[0].Content.Name
+	// Store pools informations
+	Pools, err := session.GetPool()
+	if err != nil {
+		log.Fatal(err)
+	} else {
+		for _, p := range Pools.Entries {
+			unityPools = append(unityPools, p.Content)
+		}
+	}
+
+	// Store storage resources informations
+	StorageResources, err := session.GetStorageResource()
+	if err != nil {
+		log.Fatal(err)
+	} else {
+		for _, s := range StorageResources.Entries {
+			unityStorageResource = append(unityStorageResource, s.Content)
+		}
+	}
 
 	if *capacityPtr {
-
-		// Get pool informations
-		Pools, err := session.GetPool()
-		if err != nil {
-			log.Fatal(err)
-		} else {
-			for _, p := range Pools.Entries {
-
-				parsePool(p.Content.ID, p.Content.Name, p.Content.SizeFree, p.Content.SizeSubscribed, p.Content.SizeTotal, p.Content.SizeUsed)
-			}
+		// Parse pool info into influxdb line protocol
+		for _, p := range unityPools {
+			parsePool(p.ID, p.Name, p.SizeFree, p.SizeSubscribed, p.SizeTotal, p.SizeUsed)
 		}
 
-		StorageResources, err := session.GetStorageResource()
-		if err != nil {
-			log.Fatal(err)
-		} else {
-			for _, s := range StorageResources.Entries {
-
-				parseStorageResource(s.Content.ID, s.Content.Name, s.Content.SizeAllocated, s.Content.SizeTotal, s.Content.SizeUsed)
-			}
+		// Parse storage resources info into influxdb line protocol
+		for _, s := range unityStorageResource {
+			parseStorageResource(s.ID, s.Name, s.SizeAllocated, s.SizeTotal, s.SizeUsed)
 		}
-
 	}
 
 	if *histpathsPtr != "" {
@@ -277,7 +342,7 @@ func main() {
 					"key":   "paths",
 					"value": p,
 					"error": err,
-				}).Error("Querying historical metric")
+				}).Error("Querying historical metric(s)")
 			} else {
 				parseResult(MetricValue.Entries[0].Content.Timestamp, MetricValue.Entries[0].Content.Path, MetricValue.Entries[0].Content.Values.(map[string]interface{}))
 			}
@@ -298,7 +363,7 @@ func main() {
 			log.Fatal(err)
 		}
 
-		// Waiting that the sampling of the metrics is done
+		// Waiting thforat the sampling of the metrics to be done
 		time.Sleep(time.Duration(Metric.Content.Interval) * time.Second)
 
 		// Get the results of the query
@@ -308,7 +373,7 @@ func main() {
 				"event": "realtime",
 				"key":   "error",
 				"error": err,
-			}).Error("Querying historical metric")
+			}).Error("Querying real time metric(s)")
 		} else {
 			// Parse the results
 			for _, v := range Result.Entries {
